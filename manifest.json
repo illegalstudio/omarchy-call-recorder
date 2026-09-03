@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "illegalstudio.omarchy-call-recorder",
+  "name": "Call Recorder",
+  "version": "1.0.0",
+  "author": "illegalstudio",
+  "license": "MIT",
+  "description": "Record microphone and desktop audio with live controls",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Call Recorder",
+    "description": "Live call recording controls and audio meters",
+    "category": "Audio",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "microphone": ""
+    },
+    "schema": [
+      {
+        "key": "microphone",
+        "type": "string",
+        "label": "Preferred microphone",
+        "defaultValue": "",
+        "description": "Leave empty to use the default microphone when recording starts."
+      }
+    ]
+  }
+}
