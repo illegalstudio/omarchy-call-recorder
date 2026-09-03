@@ -12,10 +12,15 @@ Item {
   readonly property string backendPath: Qt.resolvedUrl("recorder.py").toString().replace(/^file:\/\//, "")
 
   property string preferredMicrophone: ""
+  property string preferredDesktopOutput: ""
   property var microphones: []
+  property var desktopOutputs: []
   property string defaultMicrophone: ""
+  property string defaultDesktopOutput: ""
   property string desktopSource: ""
   property string desktopLabel: "Default output"
+  readonly property var desktopOutputOptions: [{ value: "", label: "Follow system output" }]
+    .concat(desktopOutputs || [])
 
   property bool starting: false
   property bool recording: false
@@ -28,8 +33,14 @@ Item {
   property string currentMicrophone: ""
   property string currentMicrophoneLabel: "Default microphone"
   property string currentDesktop: ""
+  property string currentDesktopOutput: ""
   property string currentDesktopLabel: "Default output"
+  property bool desktopHealthy: true
+  property string desktopStatus: ""
   property string outputPath: ""
+  property string microphoneTrackPath: ""
+  property string desktopTrackPath: ""
+  property string sessionPath: ""
   property string lastSavedPath: ""
   property string errorText: ""
 
@@ -80,7 +91,9 @@ Item {
         return
       }
       microphones = data.microphones || []
+      desktopOutputs = data.desktop_outputs || []
       defaultMicrophone = String(data.default_microphone || "")
+      defaultDesktopOutput = String(data.default_desktop_output || "")
       desktopSource = String(data.desktop_source || "")
       desktopLabel = String(data.desktop_label || "Default output")
     } catch (error) {
@@ -101,11 +114,17 @@ Item {
     var selected = microphoneExists(preferredMicrophone) ? preferredMicrophone : defaultMicrophone
     var args = [backendPath, "record"]
     if (selected !== "") args.push("--microphone", selected)
+    if (preferredDesktopOutput !== "") args.push("--desktop-output", preferredDesktopOutput)
 
     errorText = ""
     outputPath = ""
+    microphoneTrackPath = ""
+    desktopTrackPath = ""
+    sessionPath = ""
     microphoneLevel = 0
     desktopLevel = 0
+    desktopHealthy = true
+    desktopStatus = "Checking desktop audio route"
     microphoneMuted = false
     desktopMuted = false
     recordedMs = 0
@@ -144,6 +163,11 @@ Item {
   function setMicrophone(name) {
     preferredMicrophone = String(name || "")
     if (recording && !stopping) sendCommand("microphone", preferredMicrophone)
+  }
+
+  function setDesktopOutput(name) {
+    preferredDesktopOutput = String(name || "")
+    if (recording && !stopping) sendCommand("desktop-output", preferredDesktopOutput)
   }
 
   function stopRecording() {
@@ -190,9 +214,13 @@ Item {
       stopping = false
       segmentStartedMs = Date.now()
       outputPath = String(data.path || "")
+      microphoneTrackPath = String(data.microphone_path || "")
+      desktopTrackPath = String(data.desktop_path || "")
+      sessionPath = String(data.session_path || "")
       currentMicrophone = String(data.microphone || "")
       currentMicrophoneLabel = String(data.microphone_label || microphoneLabel(currentMicrophone))
       currentDesktop = String(data.desktop || "")
+      currentDesktopOutput = String(data.desktop_output || "")
       currentDesktopLabel = String(data.desktop_label || desktopLabel)
       return
     }
@@ -217,14 +245,30 @@ Item {
     }
 
     if (data.type === "device") {
-      currentMicrophone = String(data.microphone || currentMicrophone)
-      currentMicrophoneLabel = String(data.microphone_label || microphoneLabel(currentMicrophone))
+      if (data.microphone !== undefined) {
+        currentMicrophone = String(data.microphone || currentMicrophone)
+        currentMicrophoneLabel = String(data.microphone_label || microphoneLabel(currentMicrophone))
+      }
+      if (data.desktop !== undefined) {
+        currentDesktop = String(data.desktop || currentDesktop)
+        currentDesktopOutput = String(data.desktop_output || currentDesktopOutput)
+        currentDesktopLabel = String(data.desktop_label || currentDesktopLabel)
+      }
+      return
+    }
+
+    if (data.type === "health") {
+      desktopHealthy = data.desktop_healthy === true
+      desktopStatus = String(data.desktop_status || "")
       return
     }
 
     if (data.type === "saved") {
       commitRunningTime()
       lastSavedPath = String(data.path || outputPath)
+      microphoneTrackPath = String(data.microphone_path || microphoneTrackPath)
+      desktopTrackPath = String(data.desktop_path || desktopTrackPath)
+      sessionPath = String(data.session_path || sessionPath)
       recording = false
       paused = false
       stopping = false
@@ -258,6 +302,7 @@ Item {
     function muteMicrophone(value: string): void { root.setMicrophoneMuted(root.boolValue(value)) }
     function muteDesktop(value: string): void { root.setDesktopMuted(root.boolValue(value)) }
     function microphone(name: string): void { root.setMicrophone(name) }
+    function desktopOutput(name: string): void { root.setDesktopOutput(name) }
     function isActive(): string { return root.visibleInBar ? "true" : "false" }
     function state(): string {
       return JSON.stringify({
@@ -270,9 +315,15 @@ Item {
         microphone: root.currentMicrophone,
         microphoneLabel: root.currentMicrophoneLabel,
         desktop: root.currentDesktop,
+        desktopOutput: root.currentDesktopOutput,
         desktopLabel: root.currentDesktopLabel,
+        desktopHealthy: root.desktopHealthy,
+        desktopStatus: root.desktopStatus,
         elapsed: root.elapsedSeconds,
         path: root.outputPath,
+        microphoneTrackPath: root.microphoneTrackPath,
+        desktopTrackPath: root.desktopTrackPath,
+        sessionPath: root.sessionPath,
         error: root.errorText
       })
     }

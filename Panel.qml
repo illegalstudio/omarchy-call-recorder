@@ -10,6 +10,7 @@ Panel {
 
   readonly property var service: bar && bar.shell ? bar.shell.serviceFor(moduleName) : null
   readonly property string configuredMicrophone: String(setting("microphone", "") || "")
+  readonly property string configuredDesktopOutput: String(setting("desktopOutput", "") || "")
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color dim: Qt.darker(foreground, 1.45)
@@ -22,6 +23,13 @@ Panel {
     when: root.service !== null
   }
 
+  Binding {
+    target: root.service
+    property: "preferredDesktopOutput"
+    value: root.configuredDesktopOutput
+    when: root.service !== null
+  }
+
   function selectMicrophone(name) {
     var next = Object.assign({}, settings, { microphone: String(name || "") })
     settings = next
@@ -31,6 +39,13 @@ Panel {
 
   function togglePause() {
     if (service) service.togglePause()
+  }
+
+  function selectDesktopOutput(name) {
+    var next = Object.assign({}, settings, { desktopOutput: String(name || "") })
+    settings = next
+    if (bar && bar.shell) bar.shell.updateEntryInline(moduleName, next)
+    if (service) service.setDesktopOutput(name)
   }
 
   function toggleMicrophoneMute() {
@@ -139,34 +154,31 @@ Panel {
           onChanged: function(value) { root.selectMicrophone(value) }
         }
 
-        Column {
+        Dropdown {
+          id: desktopPicker
           width: parent.width
-          spacing: Style.space(3)
+          label: "Desktop output"
+          value: root.configuredDesktopOutput
+          options: root.service ? root.service.desktopOutputOptions : []
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onChanged: function(value) { root.selectDesktopOutput(value) }
+        }
 
-          Text {
-            text: "DESKTOP AUDIO"
-            textFormat: Text.PlainText
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-          }
-
-          Text {
-            width: parent.width
-            text: root.service ? root.service.currentDesktopLabel : "Default output"
-            textFormat: Text.PlainText
-            color: root.foreground
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.body
-            elide: Text.ElideRight
-          }
+        Text {
+          width: parent.width
+          text: root.service ? root.service.desktopStatus : ""
+          textFormat: Text.PlainText
+          color: root.service && !root.service.desktopHealthy ? root.urgent : root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
         }
 
         PanelSeparator { foreground: root.foreground }
 
         PanelSectionHeader {
-          text: "INPUT LEVELS"
+          text: "RECORDED LEVELS"
           foreground: root.foreground
           fontFamily: root.fontFamily
         }
@@ -254,6 +266,17 @@ Panel {
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           elide: Text.ElideMiddle
+        }
+
+        Text {
+          width: parent.width
+          visible: root.service && root.service.recording
+          text: "Microphone and desktop are also saved as separate FLAC tracks"
+          textFormat: Text.PlainText
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
         }
 
         Text {

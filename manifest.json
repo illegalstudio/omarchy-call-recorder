@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "illegalstudio.omarchy-call-recorder",
   "name": "Call Recorder",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "illegalstudio",
   "license": "MIT",
   "description": "Record microphone and desktop audio with live controls",
@@ -22,7 +22,8 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "microphone": ""
+      "microphone": "",
+      "desktopOutput": ""
     },
     "schema": [
       {
@@ -31,6 +32,13 @@
         "label": "Preferred microphone",
         "defaultValue": "",
         "description": "Leave empty to use the default microphone when recording starts."
+      },
+      {
+        "key": "desktopOutput",
+        "type": "string",
+        "label": "Desktop output",
+        "defaultValue": "",
+        "description": "Leave empty to follow the system output while recording."
       }
     ]
   }
