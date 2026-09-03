@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "illegalstudio.omarchy-call-recorder",
   "name": "Call Recorder",
-  "version": "1.1.0",
+  "version": "0.1.0",
   "author": "illegalstudio",
   "license": "MIT",
   "description": "Record microphone and desktop audio with live controls",
