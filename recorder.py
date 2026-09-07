@@ -101,8 +101,10 @@ def device_label(devices, name):
     return name or "Default microphone"
 
 
-def artifact_paths(output_path):
+def artifact_paths(output_path, *, grouped=False):
     stem = output_path.with_suffix("")
+    if grouped:
+        stem = stem.with_name(stem.name.removesuffix("-audio"))
     return {
         "mix": output_path,
         "microphone": stem.with_name(f"{stem.name}-microphone.flac"),
@@ -112,15 +114,23 @@ def artifact_paths(output_path):
 
 
 def choose_output_path(explicit_path):
-    if explicit_path:
-        path = Path(explicit_path).expanduser()
-    else:
-        from datetime import datetime
-
+    if not explicit_path:
         directory = Path.home() / "Music" / "Recordings"
+        directory.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        path = directory / f"call-{stamp}.mp3"
+        for index in range(1, 1000):
+            number = "" if index == 1 else f"-{index}"
+            session_directory = directory / f"{stamp}{number}-audio-rec"
+            try:
+                # Reserve the whole folder, even if an existing one is empty.
+                session_directory.mkdir(mode=0o700)
+            except FileExistsError:
+                continue
+            return session_directory / f"{stamp}{number}-audio.mp3"
+        raise RuntimeError("Could not choose an unused recording folder")
 
+    # An explicit CLI filename retains its custom path and sidecar names.
+    path = Path(explicit_path).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
     if not any(candidate.exists() for candidate in artifact_paths(path).values()):
         return path
@@ -192,7 +202,7 @@ class Recorder:
             raise RuntimeError("No desktop audio source is available")
 
         self.output_file = choose_output_path(output_file)
-        self.artifacts = artifact_paths(self.output_file)
+        self.artifacts = artifact_paths(self.output_file, grouped=not output_file)
         self.loop = GLib.MainLoop()
         self.pipeline = None
         self.mic_volume = None
@@ -671,7 +681,10 @@ def main():
     record_parser = subparsers.add_parser("record")
     record_parser.add_argument("--microphone", default="")
     record_parser.add_argument("--desktop-output", default="")
-    record_parser.add_argument("--output-file", default="")
+    record_parser.add_argument(
+        "--output-file", default="",
+        help="Use an explicit MP3 path instead of a dated recording folder",
+    )
     args = parser.parse_args()
 
     if args.action == "devices":

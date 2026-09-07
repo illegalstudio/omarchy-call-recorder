@@ -43,8 +43,19 @@ FLAC tracks on a shared timeline. After stopping, the plugin mixes the completed
 tracks into a 192 kbps MP3, without real-time mixing deadlines. The widget shows
 export progress and notifies you when the MP3 is ready.
 
-Files are saved in `~/Music/Recordings/`, together with a JSON session report
-containing route changes, controls, timeline corrections, and export status.
+Each recording gets its own `YYYY-MM-DD_HH-MM-SS-audio-rec` folder inside
+`~/Music/Recordings/`. For example:
+
+```text
+2026-09-07_10-23-13-audio-rec/
+├── 2026-09-07_10-23-13-audio.mp3
+├── 2026-09-07_10-23-13-microphone.flac
+├── 2026-09-07_10-23-13-desktop.flac
+└── 2026-09-07_10-23-13-session.json
+```
+
+The JSON session report contains route changes, controls, timeline corrections,
+and export status. Existing recording folders are never reused or overwritten.
 The FLAC tracks remain available even if MP3 export fails. The mixed MP3 can be
 uploaded directly to Plaud Web.
 

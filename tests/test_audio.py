@@ -210,8 +210,10 @@ class AudioTests(unittest.TestCase):
             "default_microphone": "synthetic", "default_desktop_output": "synthetic",
             "desktop_outputs": [{"value": "synthetic", "source": "synthetic.monitor"}],
         }
-        with patch("recorder.audio_devices", return_value=devices):
-            instance = Recorder("", "", str(self.output))
+        with patch("recorder.audio_devices", return_value=devices), \
+                patch("recorder.Path.home", return_value=self.directory):
+            instance = Recorder("", "", "")
+        self.output = instance.output_file
         instance.active_file = self.directory / "active.json"
         instance.lock_file = self.directory / "recorder.lock"
 
@@ -263,6 +265,12 @@ class AudioTests(unittest.TestCase):
         self.assertEqual(events[-1]["type"], "saved")
         self.assertIn({"type": "state", "state": "finalizing"}, events)
         session = json.loads(instance.artifacts["session"].read_text())
+        self.assertEqual(self.output.parent.parent, self.directory / "Music" / "Recordings")
+        self.assertRegex(self.output.parent.name, r"^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-audio-rec$")
+        stamp = self.output.parent.name.removesuffix("-audio-rec")
+        self.assertEqual({path.name for path in self.output.parent.iterdir()},
+                         {f"{stamp}-{name}" for name in
+                          ("audio.mp3", "microphone.flac", "desktop.flac", "session.json")})
         self.assertEqual(session["files"], {key: str(path) for key, path in instance.artifacts.items()})
         for event in (events[0], events[-1]):
             self.assertEqual(event["path"], str(self.output))
