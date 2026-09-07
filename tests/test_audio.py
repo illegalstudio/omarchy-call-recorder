@@ -103,9 +103,13 @@ class AudioTests(unittest.TestCase):
     def test_late_desktop_start_and_clock_jump_preserve_all_audio(self):
         stamps = [.12 + i / 10 + (.21 if i >= 5 else 0) for i in range(10)]
         stats = self.capture(stamps, delayed=True)
-        self.assertEqual(stats, {"in": 48000, "out": 63840, "add": 15840, "drop": 0})
+        self.assertEqual({key: stats[key] for key in ("in", "add", "drop")},
+                         {"in": 48000, "add": 15840, "drop": 0})
         samples = decode(self.desktop)
+        # GStreamer 1.24 undercounts the `out` property when filling a gap.
+        # Verify actual decoded output, not that version-dependent statistic.
         self.assertEqual(len(samples), 63840)
+        self.assertEqual(len(samples), stats["in"] + stats["add"] - stats["drop"])
         self.assertLess(max(abs(x) for x in samples[:5760]), 3)
         self.assertLess(max(abs(x) for x in samples[29760:39840]), 3)
         for start in (.12, .22, .32, .42, .52, .83, .93, 1.03, 1.13, 1.23):
@@ -147,6 +151,43 @@ class AudioTests(unittest.TestCase):
         flac(self.desktop, tone(880, 1, .8))
         mix_tracks(self.mic, self.desktop, self.output)
         self.assertLess(max(abs(value) for value in decode(self.output)), 32767)
+
+    def test_mix_preserves_mute_gaps_and_tails_in_both_input_orders(self):
+        microphone = tone(440, .4) + array("h", [0]) * round(.3 * RATE) + tone(440, 1.3)
+        desktop = tone(880, 1.2) + array("h", [0]) * round(.3 * RATE) + tone(880, .5)
+        flac(self.mic, microphone)
+        flac(self.desktop, desktop)
+        for index, sources in enumerate(((self.mic, self.desktop), (self.desktop, self.mic))):
+            with self.subTest(input_order=index):
+                output = self.directory / f"order-{index}.mp3"
+                mix_tracks(*sources, output)
+                samples = decode(output)
+                self.assertEqual(len(samples), 2 * RATE)
+                for second, mic_active, desktop_active in (
+                        (.1, True, True), (.5, False, True), (.8, True, True),
+                        (1.0, True, True), (1.3, True, False), (1.7, True, True)):
+                    self.assertAlmostEqual(amplitude(samples, 440, second),
+                                           .095 if mic_active else 0, delta=.01)
+                    self.assertAlmostEqual(amplitude(samples, 880, second),
+                                           .095 if desktop_active else 0, delta=.01)
+
+    def test_longer_microphone_tail_is_not_truncated(self):
+        flac(self.mic, tone(440, 1.003))
+        flac(self.desktop, tone(880, .713))
+        mix_tracks(self.mic, self.desktop, self.output)
+        samples = decode(self.output)
+        self.assertEqual(len(samples), round(1.003 * RATE))
+        self.assertAlmostEqual(amplitude(samples, 440, .85), .095, delta=.01)
+        self.assertAlmostEqual(amplitude(samples, 880, .85), 0, delta=.01)
+
+    def test_fully_silent_source_does_not_suppress_the_other_source(self):
+        flac(self.mic, array("h", [0]) * (2 * RATE))
+        flac(self.desktop, tone(880, 2))
+        mix_tracks(self.mic, self.desktop, self.output)
+        samples = decode(self.output)
+        self.assertEqual(len(samples), 2 * RATE)
+        for second in (.1, .8, 1.7):
+            self.assertAlmostEqual(amplitude(samples, 880, second), .095, delta=.01)
 
     def test_existing_output_is_not_overwritten(self):
         self.output.write_bytes(b"existing recording")

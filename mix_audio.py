@@ -11,8 +11,13 @@ import tempfile
 
 SAMPLE_RATE = 48000
 BITRATE = "192k"
+# FFmpeg 6.1's amix can discard queued samples from its first input at EOF.
+# Pad both tracks to the same sample count, interleave them, then sum in float
+# so neither the shorter track's tail nor overlapping peaks are lost.
 MIX_FILTER = (
-    "[0:a][1:a]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,"
+    "[0:a]aformat=sample_fmts=flt:channel_layouts=mono,apad=whole_len={samples}[mic];"
+    "[1:a]aformat=sample_fmts=flt:channel_layouts=mono,apad=whole_len={samples}[desktop];"
+    "[mic][desktop]amerge=inputs=2,pan=mono|c0=c0+c1,"
     "alimiter=limit=0.89:level=false:latency=true[out]"
 )
 
@@ -55,6 +60,7 @@ def mix_tracks(microphone, desktop, output, progress=None):
                 or int(source["channels"]) != 1):
             raise RuntimeError("Mixing requires timeline-aligned, mono 48 kHz FLAC tracks")
     duration = max(float(source["duration"]) for source in sources)
+    mix_filter = MIX_FILTER.format(samples=round(duration * SAMPLE_RATE))
     fd, temporary_name = tempfile.mkstemp(prefix=f".{output.stem}-", suffix=".mp3", dir=output.parent)
     os.close(fd)
     temporary = Path(temporary_name)
@@ -62,7 +68,7 @@ def mix_tracks(microphone, desktop, output, progress=None):
         command = [
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-xerror", "-nostdin", "-y",
             "-i", str(microphone), "-i", str(desktop),
-            "-filter_complex", MIX_FILTER, "-map", "[out]",
+            "-filter_complex", mix_filter, "-map", "[out]",
             "-ar", str(SAMPLE_RATE), "-ac", "1", "-c:a", "libmp3lame", "-b:a", BITRATE,
             "-write_xing", "1", "-progress", "pipe:1", "-nostats", str(temporary),
         ]
@@ -96,7 +102,7 @@ def mix_tracks(microphone, desktop, output, progress=None):
             progress(100)
         return {
             "method": "offline-flac-mix", "sample_rate": SAMPLE_RATE, "bitrate": BITRATE,
-            "duration_seconds": duration, "filter": MIX_FILTER,
+            "duration_seconds": duration, "filter": mix_filter,
             "source_duration_seconds": [float(source["duration"]) for source in sources],
         }
     finally:
