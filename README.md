@@ -38,10 +38,18 @@ and desktop output selection, pause, source muting, and stop.
 The desktop capture follows system output changes unless a specific output is
 selected. The panel warns when Chrome is playing on a different output.
 
-Each recording creates a mixed MP3, separate lossless FLAC tracks for the
-microphone and desktop, and a JSON session report with route and control events.
-Files are saved in `~/Music/Recordings/`. The mixed MP3 can be uploaded directly
-to Plaud Web.
+While recording, microphone and desktop audio are saved as separate lossless
+FLAC tracks on a shared timeline. After stopping, the plugin mixes the completed
+tracks into a 192 kbps MP3, without real-time mixing deadlines. The widget shows
+export progress and notifies you when the MP3 is ready.
+
+Files are saved in `~/Music/Recordings/`, together with a JSON session report
+containing route changes, controls, timeline corrections, and export status.
+The FLAC tracks remain available even if MP3 export fails. The mixed MP3 can be
+uploaded directly to Plaud Web.
+
+Requires Python with PyGObject, GStreamer (PulseAudio, FLAC, audio conversion,
+resampling, audiorate, and level plugins), `pactl`, and `ffmpeg`/`ffprobe`.
 
 ## Development
 
@@ -51,5 +59,6 @@ Run the complete local validation with:
 make check
 ```
 
-This validates `manifest.json`, runs `omarchy plugin validate .`, compiles the
-Python backend, and checks the release script syntax.
+This validates `manifest.json`, runs `omarchy plugin validate .`, and tests
+capture timing, pause/mute controls, offline mixing, and export failures with
+synthetic audio. Tests do not access the microphone or system playback.

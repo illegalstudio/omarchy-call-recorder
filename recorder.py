@@ -17,6 +17,8 @@ import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
+from mix_audio import check_dependencies, mix_tracks
+
 
 APP_NAME = "Omarchy Call Recorder"
 
@@ -157,6 +159,22 @@ def desktop_route(devices, requested_output):
     return selected or {}, fallback
 
 
+def capture_branch(source, name, output):
+    # FLAC does not retain buffer timestamps. Make sample positions match the
+    # shared pipeline timeline, including delayed starts and clock corrections.
+    # No live mixer may discard a late source: both files are mixed after EOS.
+    return (
+        f"{source} ! audioconvert ! audioresample ! "
+        "audio/x-raw,format=F32LE,rate=48000,channels=1 ! "
+        f"audiorate name={name}rate skip-to-first=false tolerance=1000000 ! "
+        f"volume name={name}volume ! "
+        f"level name={name}level interval=100000000 post-messages=true ! "
+        "audioconvert ! audio/x-raw,format=S16LE,rate=48000,channels=1 ! "
+        "flacenc quality=5 ! "
+        f"filesink location={gst_quote(output)} sync=false async=false "
+    )
+
+
 class Recorder:
     def __init__(self, microphone, desktop_output, output_file):
         self.devices = audio_devices()
@@ -183,6 +201,9 @@ class Recorder:
         self.paused = False
         self.stopping = False
         self.failed = False
+        self.received_eos = False
+        self.timeline_stats = {}
+        self.mix_result = None
         self.mic_muted = False
         self.desktop_muted = False
         self.levels = {"miclevel": 0.0, "desktoplevel": 0.0}
@@ -207,37 +228,16 @@ class Recorder:
             raise RuntimeError("A call recording is already active") from error
 
     def build_pipeline(self):
-        description = (
+        microphone = (
             f"pulsesrc name=micsrc device={gst_quote(self.microphone)} "
-            f"client-name={gst_quote(APP_NAME + ' Microphone')} provide-clock=true ! "
-            "audioconvert ! audioresample ! "
-            "audio/x-raw,format=F32LE,rate=48000,channels=1 ! "
-            "volume name=micvolume ! "
-            "level name=miclevel interval=100000000 post-messages=true ! "
-            "tee name=micsplit "
-            "micsplit. ! queue ! mix. "
-            "micsplit. ! queue ! audioconvert ! "
-            "audio/x-raw,format=S16LE,rate=48000,channels=1 ! "
-            "flacenc quality=5 ! "
-            f"filesink location={gst_quote(self.artifacts['microphone'])} "
-            f"pulsesrc name=desktopsrc device={gst_quote(self.desktop_source)} "
-            f"client-name={gst_quote(APP_NAME + ' Desktop')} provide-clock=false ! "
-            "audioconvert ! audioresample ! "
-            "audio/x-raw,format=F32LE,rate=48000,channels=1 ! "
-            "volume name=desktopvolume ! "
-            "level name=desktoplevel interval=100000000 post-messages=true ! "
-            "tee name=desktopsplit "
-            "desktopsplit. ! queue ! mix. "
-            "desktopsplit. ! queue ! audioconvert ! "
-            "audio/x-raw,format=S16LE,rate=48000,channels=1 ! "
-            "flacenc quality=5 ! "
-            f"filesink location={gst_quote(self.artifacts['desktop'])} "
-            "audiomixer name=mix ! audioconvert ! audioresample ! "
-            "audiodynamic mode=compressor characteristics=soft-knee threshold=0.9 ratio=0.25 ! "
-            "lamemp3enc target=bitrate bitrate=128 cbr=true encoding-engine-quality=standard ! "
-            "id3v2mux ! "
-            f"filesink location={gst_quote(self.output_file)}"
+            f"client-name={gst_quote(APP_NAME + ' Microphone')} provide-clock=true"
         )
+        desktop = (
+            f"pulsesrc name=desktopsrc device={gst_quote(self.desktop_source)} "
+            f"client-name={gst_quote(APP_NAME + ' Desktop')} provide-clock=false"
+        )
+        description = capture_branch(microphone, "mic", self.artifacts["microphone"])
+        description += capture_branch(desktop, "desktop", self.artifacts["desktop"])
         self.pipeline = Gst.parse_launch(description)
         self.mic_volume = self.pipeline.get_by_name("micvolume")
         self.desktop_volume = self.pipeline.get_by_name("desktopvolume")
@@ -258,15 +258,12 @@ class Recorder:
 
         if message.type == Gst.MessageType.EOS:
             self.finished_at = now_iso()
-            self.write_session_metadata("saved")
-            emit(
-                "saved",
-                path=str(self.output_file),
-                microphone_path=str(self.artifacts["microphone"]),
-                desktop_path=str(self.artifacts["desktop"]),
-                session_path=str(self.artifacts["session"]),
-            )
+            self.received_eos = True
             self.loop.quit()
+            return
+
+        if message.type == Gst.MessageType.LATENCY:
+            self.pipeline.recalculate_latency()
             return
 
         if message.type != Gst.MessageType.ELEMENT:
@@ -327,7 +324,7 @@ class Recorder:
 
     def write_session_metadata(self, status):
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "status": status,
             "started_at": self.started_at,
             "finished_at": self.finished_at or now_iso(),
@@ -341,6 +338,11 @@ class Recorder:
             "control_events": self.control_events,
             "peak_levels": self.peak_levels,
             "desktop_active_samples": self.desktop_active_samples,
+            "timeline": {
+                "method": "audiorate", "sample_rate": 48000,
+                "tolerance_ns": 1000000, "tracks": self.timeline_stats,
+            },
+            "mix": self.mix_result,
             "error": self.failure_detail,
         }
         self.artifacts["session"].write_text(
@@ -529,6 +531,8 @@ class Recorder:
         return False
 
     def handle_command(self, command):
+        if self.stopping:
+            return False
         action = str(command.get("command") or "")
         if action == "pause":
             self.set_paused(True)
@@ -558,6 +562,7 @@ class Recorder:
             GLib.idle_add(self.stop)
 
     def run(self):
+        check_dependencies()
         Gst.init(None)
         self.acquire_lock()
         self.build_pipeline()
@@ -585,13 +590,49 @@ class Recorder:
         command_thread = threading.Thread(target=self.read_commands, daemon=True)
         command_thread.start()
         self.loop.run()
+        # Read counters before NULL resets audiorate; close/flush both encoders
+        # before ffmpeg opens the FLAC files. Capture is over during MP3 export.
+        for track, name in (("microphone", "micrate"), ("desktop", "desktoprate")):
+            element = self.pipeline.get_by_name(name)
+            self.timeline_stats[track] = {
+                key: int(element.get_property(key)) for key in ("in", "out", "add", "drop")
+            }
         self.pipeline.set_state(Gst.State.NULL)
         if self.finished_at is None:
             self.finished_at = now_iso()
+        if self.failed or not self.received_eos:
             self.write_session_metadata("error" if self.failed else "stopped")
+        else:
+            self.finalize()
         return 1 if self.failed else 0
 
+    def finalize(self):
+        self.stopping = True
+        emit("state", state="finalizing")
+        self.write_session_metadata("finalizing")
+        try:
+            self.mix_result = mix_tracks(
+                self.artifacts["microphone"], self.artifacts["desktop"], self.output_file,
+                progress=lambda percent: emit("progress", percent=percent),
+            )
+        except Exception as error:
+            self.failed = True
+            self.failure_detail = str(error)
+            self.write_session_metadata("error")
+            emit("error", message="Could not create the MP3. Your FLAC tracks are preserved in "
+                 + str(self.output_file.parent), detail=self.failure_detail)
+            return
+        self.write_session_metadata("saved")
+        emit(
+            "saved", path=str(self.output_file),
+            microphone_path=str(self.artifacts["microphone"]),
+            desktop_path=str(self.artifacts["desktop"]),
+            session_path=str(self.artifacts["session"]),
+        )
+
     def cleanup(self):
+        if self.pipeline is not None:
+            self.pipeline.set_state(Gst.State.NULL)
         try:
             if self.active_file.exists():
                 state = json.loads(self.active_file.read_text(encoding="utf-8"))

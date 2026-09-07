@@ -26,6 +26,8 @@ Item {
   property bool recording: false
   property bool paused: false
   property bool stopping: false
+  property bool finalizing: false
+  property int exportProgress: 0
   property bool microphoneMuted: false
   property bool desktopMuted: false
   property real microphoneLevel: 0
@@ -132,6 +134,8 @@ Item {
     starting = true
     paused = false
     stopping = false
+    finalizing = false
+    exportProgress = 0
     recorderProc.command = args
     recorderProc.running = true
     return "starting"
@@ -197,9 +201,12 @@ Item {
       paused = false
       return
     }
-    if (state === "stopping") {
+    if (state === "stopping" || state === "finalizing") {
       commitRunningTime()
       stopping = true
+      finalizing = state === "finalizing"
+      microphoneLevel = 0
+      desktopLevel = 0
     }
   }
 
@@ -238,6 +245,11 @@ Item {
       return
     }
 
+    if (data.type === "progress") {
+      exportProgress = Math.max(0, Math.min(100, Number(data.percent) || 0))
+      return
+    }
+
     if (data.type === "mute") {
       microphoneMuted = data.microphone === true
       desktopMuted = data.desktop === true
@@ -272,6 +284,7 @@ Item {
       recording = false
       paused = false
       stopping = false
+      finalizing = false
       microphoneLevel = 0
       desktopLevel = 0
       if (lastSavedPath !== "") {
@@ -310,6 +323,8 @@ Item {
         recording: root.recording,
         paused: root.paused,
         stopping: root.stopping,
+        finalizing: root.finalizing,
+        exportProgress: root.exportProgress,
         microphoneMuted: root.microphoneMuted,
         desktopMuted: root.desktopMuted,
         microphone: root.currentMicrophone,
@@ -357,6 +372,7 @@ Item {
       root.recording = false
       root.paused = false
       root.stopping = false
+      root.finalizing = false
       root.microphoneLevel = 0
       root.desktopLevel = 0
       root.segmentStartedMs = 0

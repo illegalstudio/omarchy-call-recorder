@@ -35,8 +35,14 @@ jobs:
             exit 1
           fi
 
+      - name: Install audio test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg python3-gi gir1.2-gstreamer-1.0 \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+
       - name: Test
-        run: make test
+        run: make test PYTHON=/usr/bin/python3
 
       - name: Publish GitHub Release
         env:

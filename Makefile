@@ -10,7 +10,8 @@ validate:
 	@$(OMARCHY) plugin validate .
 
 test:
-	@$(PYTHON) -m py_compile recorder.py
+	@$(PYTHON) -m py_compile recorder.py mix_audio.py
+	@$(PYTHON) -m unittest discover -s tests -v
 	@bash -n scripts/release.sh
 
 release:

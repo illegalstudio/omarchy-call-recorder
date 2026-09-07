@@ -120,6 +120,7 @@ Panel {
             title: "Call recording"
             meta: {
               if (!root.service) return "Starting"
+              if (root.service.finalizing) return "Preparing MP3 (" + root.service.exportProgress + "%)"
               if (root.service.stopping) return "Saving recording"
               if (root.service.paused) return "Paused"
               if (root.service.starting) return "Starting"
@@ -271,7 +272,7 @@ Panel {
         Text {
           width: parent.width
           visible: root.service && root.service.recording
-          text: "Microphone and desktop are also saved as separate FLAC tracks"
+          text: "Separate FLAC tracks are saved while recording. The MP3 is prepared after stopping."
           textFormat: Text.PlainText
           color: root.dim
           font.family: root.fontFamily
